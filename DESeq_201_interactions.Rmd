@@ -1,0 +1,230 @@
+---
+title: "interactions 20.1"
+author: "Gabriela Arciszewska"
+date: "2023-08-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(DESeq2)
+library(pheatmap)
+library(patchwork)
+library(biomaRt)
+library(reshape2)
+```
+
+```{r}
+ensembl = useEnsembl(biomart = "ensembl",
+                     dataset = "hsapiens_gene_ensembl")
+```
+
+_________________________ -----
+ DATA PROCESSING ----
+Import count matrix and metadata ----
+change path for the files and metadata
+
+```{r}
+raw_data <- read_csv("raw_data/markdup.featurecounts.csv") %>%
+  column_to_rownames(var = "Geneid") # turn the geneid column into rownames
+```
+
+```{r}
+metadata <- read_csv("resources/targets.csv") %>%
+  mutate(condition = paste(treatment, treatment_length, dev_stage, sep = "_")) %>%
+  #change all columns to factors
+  modify_if(is.character, as.factor) %>%
+  column_to_rownames(var = "sample")
+```
+
+"103.2"
+
+```{r}
+metadata_20.1 <- metadata[metadata$treatment %in% c("control", "20.1"), ]
+matching_columns <- intersect(colnames(raw_data), rownames(metadata_20.1))
+raw_20.1 <- raw_data[, matching_columns]
+```
+
+```{r}
+metadata_20.1$treatment <- factor(metadata_20.1$treatment, levels = c("control", "20.1"))
+metadata_20.1$dev_stage <- factor(metadata_20.1$dev_stage, levels =c("D70", "D100"))
+```
+
+relevel
+
+```{r}
+metadata_20.1$treatment_length <- relevel(metadata_20.1$treatment_length, "12h")
+
+sample_names_in_order <- rownames(metadata_20.1)
+colnames(raw_20.1) <- sample_names_in_order
+
+all(rownames(metadata_20.1) %in% colnames(raw_20.1))
+
+```
+
+```{r}
+
+dds_20.1 <- DESeqDataSetFromMatrix(countData = raw_20.1,
+                              colData = metadata_20.1,
+                              design = ~ treatment + treatment_length + dev_stage + treatment:treatment_length)
+```
+
+Filter low count genes ----
+remove genes that don't have at least 10 counts in 1/3 of the replicates #if metadata has 12 obs, then change it to 4 (24/3 = 8)
+
+```{r}
+keep <- rowSums(counts(dds_20.1) >= 10) >= 4
+dds_20.1 <- dds_20.1[keep,]
+```
+
+```{r}
+identifiers <- getBM(values = rownames(dds_20.1),
+                     filters = "ensembl_gene_id",
+                     attributes = c("ensembl_gene_id", "hgnc_symbol", 
+                                    "description", "entrezgene_id",
+                                    "gene_biotype"),
+                     mart = ensembl,
+                     uniqueRows = TRUE) %>% 
+  distinct(ensembl_gene_id, .keep_all = TRUE)
+```
+
+```{r}
+#Creating DESeq object
+dge_20.1 <- DESeq(dds_20.1)
+
+#LRT testing, where the null hypothesis is that there is no significant difference between the two models, i.e. the reduced model is sufficient to explain the variation in gene expression between the samples.
+dge_20.1 <- DESeq(dds_20.1, test = "LRT", reduced = ~ treatment + treatment_length + dev_stage)
+
+```
+#main effect
+
+```{r}
+
+results <- results(dge_20.1, alpha=0.05) 
+
+summary(results)
+```
+
+volcano plot
+
+```{r}
+
+results <- as.data.frame(results)
+
+# Create a dataframe with only "log2FoldChange" values of "res" dataframe
+logFC <- as.data.frame(results$log2FoldChange, row.names = row.names(results))
+colnames(logFC) <- c("log2FoldChange")
+
+applyAntiLogFC <- function(logFC) {
+  antilog.2 <- ifelse(is.na(logFC), NA,
+                      ifelse(logFC >= 0, 2 ^ logFC, -(1 / (2 ^ logFC))))
+  antilog.2
+}
+
+# Create a new column 'FC' using mutate()
+logFC <- mutate(logFC, FC = applyAntiLogFC(log2FoldChange)) #no NAs
+
+#pull out rows with gene ids as a column 
+logFC <- rownames_to_column(logFC, var = "ensembl_gene_id")
+row.names(logFC) <- 1:nrow(logFC)
+
+results <- rownames_to_column(results, var = "ensembl_gene_id")
+row.names(results) <- 1:nrow(results)
+
+#get the "FC" column into the "res" dataframe and reorder so it comes right after "log2FoldChange"
+results$FC <- logFC$FC 
+results <- results %>%
+  relocate(FC, .before = lfcSE)
+
+#add "entrezgene_id" and "gene_biotype" information
+
+results <- left_join(results, identifiers, by = "ensembl_gene_id")
+
+results$type <- ifelse(!is.na(results$log2FoldChange) & results$padj < 0.05 & !is.na(results$padj),
+                   ifelse(results$log2FoldChange < 0, "down-regulation", "up-regulation"),
+                   "no differential expression")
+
+# Volcano plot on the whole set of data. p adj <0.05 
+exp_status <- ggplot(data.frame(results), aes(x = log2FoldChange, y = -log10(padj), color = results$type)) +
+  geom_point() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  ggtitle("Treatment specific effects for 20.1") +
+  xlab("log2 fold change") +
+  ylab("-log10 p-value") +
+  labs(color = "Differential Expression Status")
+
+exp_status
+
+#set a working directory to the plots file
+setwd("~/Desktop/Dissertation/Analysis/plots/tr_vs_length_20.1/")
+
+#save a plot to a file
+ggsave("exp_status_20.1.png", exp_status)
+```
+
+```{r}
+
+dds_vst <- vst(dge_20.1, blind = TRUE)
+
+plotPCA_20.1 <- plotPCA(dds_vst, intgroup = c("treatment", "treatment_length"))
+
+developmental_stage <- dds_vst$dev_stage
+
+plotPCA_20.1 <- plotPCA_20.1 + 
+  geom_point(aes(shape = developmental_stage), size = 5)+ 
+  labs(color = "Developmental Stage") + 
+  ggtitle("PCA shows segregation of samples by developmental stage")
+
+# Show the updated PCA plot
+print(plotPCA_20.1)
+
+#set a working directory to the output file
+setwd("~/Desktop/Dissertation/Analysis/plots/tr_vs_length_20.1/")
+
+#save a plot to a file
+ggsave("PCA_20.1.png", plotPCA_20.1)
+
+```
+
+```{r}
+normalized_counts <- counts(dge_20.1, normalized = TRUE) %>% as.data.frame()
+
+normalized_counts <- normalized_counts %>% rename_with(~paste0("norm_counts_", .), everything())
+
+normalized_counts <- rownames_to_column(normalized_counts, var = "ensembl_gene_id")
+
+raw_103.2 <- rownames_to_column(raw_20.1, var = "ensembl_gene_id")
+
+all_counts <- left_join (normalized_counts, raw_103.2, by = "ensembl_gene_id") 
+
+rownames(all_counts) <- all_counts[,1] 
+
+all_counts <- dplyr::select(all_counts, - "ensembl_gene_id")
+
+all_counts <- all_counts %>%
+  rename_with(~str_replace(., "^(?!norm_counts_)", "raw_counts_"))
+
+all_counts <- rownames_to_column(all_counts, var = "ensembl_gene_id")
+```
+
+```{r}
+results <- dplyr::select(results, - type)
+
+
+final_results <- left_join(results, all_counts,by= "ensembl_gene_id")
+
+```
+
+```{r}
+setwd("~/Desktop/Dissertation/Analysis/output_updated/DESeq_results/")
+
+write.csv(final_results, file = "20.1final_results.csv", row.names = FALSE)
+save(final_results, file = "20.1final_results.RData")
+
+```
+
