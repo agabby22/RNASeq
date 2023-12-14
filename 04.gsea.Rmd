@@ -1,0 +1,242 @@
+---
+title: "04.gsea"
+author: "Gabriela Arciszewska"
+date: "2023-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#GENE SET ENRICHMENT ANALYSES ----
+#Explore pathways and GO terms associated with the datasets produced during
+#the differential gene expression analysis in the previous steps.
+
+# _________________________ -----
+#LIBRARIES AND ENVIRONMENT ----
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(clusterProfiler)
+library(progress)
+library(glue)
+library(org.Hs.eg.db)
+library(DOSE)
+library(cowplot)
+```
+
+# _________________________ -----
+#DATA PROCESSING ----
+#find the RData that contains all previously produced datasets. It will get
+#updated with the outcome of the new analysis.
+
+##Datasets ----
+
+```{r}
+metadata <- read_delim("~/Desktop/Dissertation/Analysis/resources/targets.csv")
+
+  all_datasets <- ("~/Desktop/Dissertation/Analysis/output_updated/DESeq_results/control_d70_vs_control_d100.RData")
+
+##Output folders ----
+
+#if(!dir.exists("~/Desktop/Dissertation/Analysis/output/geneset_enrichment/")) {
+  #dir.create("~/Desktop/Dissertation/Analysis/output/geneset_enrichment/")
+#}
+
+```
+
+```{r}
+#for progress bar
+#pb <-
+  #progress_bar$new(format = "processing files [:bar] :current/:total (:percent) in :elapsed",
+                   #total = length(all_datasets)
+```
+
+```{r}
+
+final_Results <- read_csv("Desktop/Dissertation/Analysis/output_updated/DESeq_results/control_d70_vs_control_d100.csv")
+
+##Analysis ----
+
+#for (file in all_datasets) {
+  
+  #load(file)
+
+  ##subset metadata ----
+  samples <- colnames(final_results)[grepl("raw_counts", colnames(final_results))] %>% 
+    str_remove_all("raw_counts_")
+  
+  file_metadata <- dplyr::filter(metadata, sample %in% samples)
+
+  ### Define significant genes to test and background (universe) ----
+  #if the control sample is the experimental, multiply FC * -1 to get more
+  #intuitive results
+  
+  filtered_data <- final_results %>%
+    mutate(entrez_id = as.character(entrez_id),
+           FC = FC*-1) %>%
+    dplyr::distinct(entrez_id, .keep_all = TRUE) %>% 
+    dplyr::arrange(by = -FC)
+  
+  
+  # set universe as all protein coding genes identified in the dataset
+  universe <- filtered_data$FC %>% set_names(filtered_data$entrez_id)
+  
+  # set genes as those protein coding genes that are differentially expressed (padh < 0.05)
+  genes <- filtered_data %>%
+    filter(padj < 0.05) %>%
+    pull(FC) %>%
+    set_names(filtered_data %>%
+                filter(padj < 0.05) %>%
+                pull(entrez_id))
+  
+  ##CHECK FOR PRESENCE OF DGE ----
+  #if some comparisons have no DGE or very little DGE, no terms will be significant
+  #in the downstream analysis leading to errors. This will create empty objects
+  #that will be used as placeholders.
+  if(length(genes) <= 10) {
+    warning(glue("{length(genes)} differentially expressed genes identified with the given thresholds.
+         Analysis can't be carried out. Skipping to the next dataset."))
+    
+    enrich_go <- NULL
+    simplify_go <- NULL
+    enrich_gsea <- NULL
+    simplify_gsea <- NULL
+    kegg <- NULL
+    enrich_disease <- NULL
+    disease_gsea <- NULL
+    
+    remove(res, final_results, disease_gsea, enrich_disease, filtered_data,
+           kegg, enrich_go, enrich_gsea, simplify_go, simplify_gsea)
+    pb$tick()
+    
+    next
+  }
+  
+  ##Over representation tests ----
+  ###GO over-representation analysis ----
+  #Will keep all results even if there's no significant values post-correction,
+  #so that it can be used to generate plots anyways in the shiny app.
+  
+  enrich_go <- enrichGO(
+    gene = names(genes),
+    universe = as.character(names(universe)),
+    OrgDb = org.Hs.eg.db,
+    ont = "ALL",
+    minGSSize = 20,
+    maxGSSize = 2000,
+    pAdjustMethod = "BH",
+    pvalueCutoff = 1,
+    readable = TRUE) %>%
+    filter(pvalue < 0.05)
+
+  #simplify results into most significant gene set
+  if(length(enrich_go@result) != 0) {
+  simplify_go <- clusterProfiler::simplify(
+    enrich_go,
+    cutoff = 0.6,
+    by = "pvalue",
+    select_fun = min)}
+  
+  ###GO GSEA ----
+  
+  enrich_gsea <- gseGO(
+    genes,
+    ont = "ALL",
+    minGSSize = 20,
+    maxGSSize = 2000,
+    eps = 0,
+    pAdjustMethod = "BH",
+    OrgDb = org.Hs.eg.db,
+    verbose = FALSE,
+    pvalueCutoff = 1,
+    nPermSimple = 10000) %>%
+    filter(pvalue < 0.05) %>% 
+    setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+  
+  if(length(enrich_gsea@result) != 0) {
+  
+  simplify_gsea <- simplify(
+    enrich_gsea,
+    cutoff = 0.6,
+    by = "pvalue",
+    select_fun = min)}
+  
+  ###KEGG GSEA ----
+  kegg <- gseKEGG(
+    geneList = genes,
+    organism = 'hsa',
+    minGSSize = 20,
+    maxGSSize = 2000,
+    eps = 0,
+    pvalueCutoff = 1,
+    verbose = FALSE) %>%
+    filter(pvalue < 0.05)
+  
+  ###Disease over-representation analysis ----
+  enrich_disease <- enrichDO(gene = names(genes),
+                             ont = "DO",
+                             pvalueCutoff = 1,
+                             pAdjustMethod = "BH",
+                             universe = as.character(names(universe)),
+                             minGSSize = 20,
+                             maxGSSize = 2000,
+                             readable = TRUE) %>%
+    filter(pvalue < 0.05)
+  
+  ###Disease GSEA ---- 
+  disease_gsea <- gseDO(genes,
+                        minGSSize = 20,
+                        maxGSSize = 2000,
+                        pvalueCutoff = 1,
+                        pAdjustMethod = "BH",
+                        eps = 0) %>%
+    filter(pvalue < 0.05)
+  
+  # _________________________ -----
+  #SAVE PROGRESS AND CONTINUE ----
+  disease_gsea_df <- disease_gsea@result
+  enrich_disease_df <- enrich_disease@result 
+  enrich_go_df <- enrich_go@result
+  enrich_gsea_df <- enrich_gsea@result
+  simplify_go_df <- simplify_go@result
+  simplify_gsea_df <- simplify_gsea@result
+  kegg_df <- kegg@result
+
+
+  ##Save RData for future manipulation----
+  save(file_metadata, final_results, disease_gsea, enrich_disease, filtered_data,
+         kegg, enrich_go, enrich_gsea, simplify_go, simplify_gsea, 
+       file =  glue("~/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls.RData"))
+
+  ##Clean session----
+  remove(file_metadata, final_results, disease_gsea, enrich_disease, filtered_data,
+         kegg, enrich_go, enrich_gsea, simplify_go, simplify_gsea)
+  #pb$tick()
+#}
+
+```
+
+```{r}
+library(openxlsx)
+
+write.xlsx(disease_gsea_df, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/disease_gsea.xlsx" ,colNames = TRUE)
+
+write.xlsx(enrich_disease_df, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/enrich_disease.xlsx" ,colNames = TRUE)
+
+write.xlsx(enrich_go_df, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/enrich_go.xlsx" ,colNames = TRUE)
+
+write.xlsx(enrich_gsea_df, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/enrich_gsea.xlsx" ,colNames = TRUE)
+
+write.xlsx(kegg_df, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/kegg.xlsx" ,colNames = TRUE)
+
+write.xlsx(simplify_go_df, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/simplify_go.xlsx" ,colNames = TRUE)
+
+write.xlsx(simplify_gsea_df, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/simplify_gsea.xlsx" ,colNames = TRUE)
+
+```
+
+
+
