@@ -1,0 +1,57 @@
+
+```{r}
+library(readxl)
+```
+
+```{r}
+setwd("/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/magma_input/controls_D70_vsD100/")  
+excel_files <- list.files(pattern = "\\.xlsx$")
+
+for (excel_file in excel_files) {
+  # Read Excel file
+  excel_data <- read_excel(excel_file)
+  
+  # Define the text file name
+  txt_file <- sub("\\.xlsx$", ".txt", excel_file)
+  
+  # Write data to text file
+  write.table(excel_data, txt_file, sep = "\t", row.names = FALSE, quote = FALSE, col.names = FALSE)
+}
+
+excel_files <- list.files(pattern = "\\.xlsx$")
+
+for (excel_file in excel_files) {
+  file.remove(excel_file)  # Delete the Excel file
+}
+
+```
+
+```{r}
+#set a working directory for gene sets and the specific folder
+
+setwd("/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/magma_input/controls_D70_vsD100/")  
+
+
+file_names <- c("magma_simplify_gsea.txt", "magma_disease_gsea.txt","magma_kegg.txt", "magma_enrich_disease.txt", "magma_simplify_go.txt")
+
+# Loop through each file
+for (file_name in file_names) {
+  # Read the data from the file with stringsAsFactors = FALSE
+  data <- read.table(file_name, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+
+  # Modify the first column (assuming the first column is V1)
+  data$V1 <- gsub("\"", "", data$V1)  # Remove double quotes
+  data$V1 <- gsub(" ", "_", data$V1)  # Replace spaces with underscores
+
+  # Save the modified data back to the file
+  write.table(data, file = file_name, sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE )
+
+  # Print a message indicating completion for the current file
+  cat("Modification complete for", file_name, "\n")
+}
+
+# Print a final completion message
+cat("All files modified.\n")
+
+```
+

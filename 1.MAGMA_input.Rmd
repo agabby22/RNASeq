@@ -1,0 +1,145 @@
+---
+title: "MAGMA prep"
+author: "Gabriela Arciszewska"
+date: "2023-08-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(readxl)
+library(writexl)
+library(tidyr)
+```
+
+```{r}
+
+identifiers <- read_excel("~/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/identifiers.xlsx")
+identifiers <- subset(identifiers, select = c("hgnc_symbol", "entrezgene_id"))
+identifiers <- na.omit(identifiers)
+
+```
+
+```{r}
+
+simplify_gsea <- read_excel("~/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/simplify_gsea.xlsx")
+
+simplify_gsea <- simplify_gsea %>%
+  separate_rows(core_enrichment, sep = "/\\s*") %>%
+  mutate(core_enrichment = trimws(core_enrichment))
+
+colnames(simplify_gsea)[colnames(simplify_gsea) == "core_enrichment"] = "hgnc_symbol"
+
+#subset GO terms column and genes ids
+simplify_gsea <- subset(simplify_gsea, select = c("ID", "Description", "hgnc_symbol"))
+
+simplify_gsea$Description <- paste(simplify_gsea$ID, simplify_gsea$Description, sep = "_")
+
+#join to get genes ids
+magma_simplify_gsea <- simplify_gsea %>%
+  left_join(identifiers)
+
+magma_simplify_gsea <- subset(magma_simplify_gsea, select = c("Description", "entrezgene_id"))
+
+#save to excel
+
+write_xlsx(magma_simplify_gsea, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/magma_input/controls_D70_vsD100/magma_simplify_gsea.xlsx")
+```
+
+```{r}
+simplify_go <- read_excel("~/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/simplify_go.xlsx")
+
+simplify_go <- simplify_go %>%
+  separate_rows(geneID, sep = "/\\s*") %>%
+  mutate(geneID = trimws(geneID))
+
+colnames(simplify_go)[colnames(simplify_go) == "geneID"] = "hgnc_symbol"
+
+#subset GO terms column and genes ids
+simplify_go <- subset(simplify_go, select = c("ID", "Description", "hgnc_symbol"))
+
+simplify_go$Description <- paste(simplify_go$ID, simplify_go$Description, sep = "_")
+
+#join to get genes ids
+magma_simplify_go <- simplify_go %>%
+  left_join(identifiers)
+
+magma_simplify_go <- subset(magma_simplify_go, select = c("Description", "entrezgene_id"))
+
+#save to excel
+write_xlsx(magma_simplify_go, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/magma_input/controls_D70_vsD100/magma_simplify_go.xlsx")
+                          
+```
+
+```{r}
+
+kegg <- read_excel("~/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/kegg.xlsx")
+
+kegg <- kegg %>%
+  separate_rows(core_enrichment, sep = "/\\s*") %>%
+  mutate(core_enrichment = trimws(core_enrichment))
+
+colnames(kegg)[colnames(kegg) == "core_enrichment"] = "entrezgene_id"
+
+#set column as numeric
+kegg$entrezgene_id <- as.numeric(kegg$entrezgene_id)
+
+kegg$Description <- paste(kegg$ID, kegg$Description, sep = "_")
+
+#subset GO terms column and genes ids
+magma_kegg <- subset(kegg, select = c("Description", "entrezgene_id"))
+
+#save to excel
+write_xlsx(magma_kegg, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/magma_input/controls_D70_vsD100/magma_kegg.xlsx")
+
+```
+
+```{r}
+disease_gsea <- read_excel("~/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/disease_gsea.xlsx")
+
+disease_gsea <- disease_gsea %>%
+  separate_rows(core_enrichment, sep = "/\\s*") %>%
+  mutate(core_enrichment = trimws(core_enrichment))
+
+colnames(disease_gsea)[colnames(disease_gsea) == "core_enrichment"] = "entrezgene_id"
+
+#set column as numeric
+disease_gsea$entrezgene_id <- as.numeric(disease_gsea$entrezgene_id)
+
+disease_gsea$Description <- paste(disease_gsea$ID, disease_gsea$Description, sep = "_")
+
+#subset GO terms column and genes ids
+magma_disease_gsea <- subset(disease_gsea, select = c("Description", "entrezgene_id"))
+
+#save to excel
+write_xlsx(magma_disease_gsea, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/magma_input/controls_D70_vsD100/magma_disease_gsea.xlsx")
+```
+
+```{r}
+enrich_disease <- read_excel("~/Desktop/Dissertation/Analysis/output_updated/geneset_enrichment/controls_D70_vsD100/results_controls_df/enrich_disease.xlsx")
+
+enrich_disease <- enrich_disease %>%
+  separate_rows(geneID, sep = "/\\s*") %>%
+  mutate(geneID = trimws(geneID))
+
+colnames(enrich_disease)[colnames(enrich_disease) == "geneID"] = "hgnc_symbol"
+
+#subset GO terms column and genes ids
+enrich_disease <- subset(enrich_disease, select = c("ID", "Description", "hgnc_symbol"))
+
+enrich_disease$Description <- paste(enrich_disease$ID, enrich_disease$Description, sep = "_")
+
+#join to get genes ids
+magma_enrich_disease <- enrich_disease %>%
+  left_join(identifiers)
+
+magma_enrich_disease <- subset(magma_enrich_disease, select = c("Description", "entrezgene_id"))
+
+#save to excel
+write_xlsx(magma_simplify_go, "/Users/gabrielaarciszewska/Desktop/Dissertation/Analysis/output_updated/magma_input/controls_D70_vsD100/magma_enrich_disease.xlsx")
+```
+
